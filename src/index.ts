@@ -22,9 +22,9 @@ async function uploadToNextcloud(
   env: Env
 ): Promise<void> {
   const webdavUrl = `${env.NEXTCLOUD_URL}/remote.php/dav/files/${env.NEXTCLOUD_USERNAME}/${env.NEXTCLOUD_MAILDIR_PATH}/new/${filename}`;
-  
+
   const credentials = btoa(`${env.NEXTCLOUD_USERNAME}:${env.NEXTCLOUD_PASSWORD}`);
-  
+
   const response = await fetch(webdavUrl, {
     method: 'PUT',
     headers: {
@@ -55,20 +55,16 @@ export default {
 
       // Generate maildir filename
       const filename = generateMaildirFilename();
-      
       // Upload to Nextcloud via WebDAV
       await uploadToNextcloud(rawBody, filename, env);
-      
       console.log(`Email uploaded to Nextcloud as: ${filename}`);
-      
-      // Forward the email to backup address
-      await message.forward(env.BACKUP_EMAIL);
-      
-      console.log(`Email forwarded to: ${env.BACKUP_EMAIL}`);
     } catch (error) {
       console.error('Error processing email:', error);
-      throw error;
     }
+
+    // Forward the email to backup address
+    await message.forward(env.BACKUP_EMAIL);
+    console.log(`Email forwarded to: ${env.BACKUP_EMAIL}`);
   },
 
 } satisfies ExportedHandler<Env>;
