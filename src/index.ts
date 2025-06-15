@@ -25,41 +25,81 @@ async function uploadToNextcloud(
 
   const credentials = btoa(`${env.NEXTCLOUD_USERNAME}:${env.NEXTCLOUD_PASSWORD}`);
 
-  const response = await fetch(webdavUrl, {
-    method: 'PUT',
-    headers: {
-      'Authorization': `Basic ${credentials}`,
-      'Content-Type': 'message/rfc822',
-    },
-    body: rawBody,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
 
-  if (!response.ok) {
-    throw new Error(`Failed to upload to Nextcloud: ${response.status} ${response.statusText}`);
+  try {
+    const response = await fetch(webdavUrl, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Basic ${credentials}`,
+        'Content-Type': 'message/rfc822',
+      },
+      body: rawBody,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to upload to Nextcloud: ${response.status} ${response.statusText}`);
+    }
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function uploadWithRetry(
+  rawBody: string,
+  filename: string,
+  env: Env,
+  maxRetries: number = 3
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await uploadToNextcloud(rawBody, filename, env);
+      console.log(`Email uploaded to Nextcloud as: ${filename} (attempt ${attempt})`);
+      return;
+    } catch (error) {
+      console.error(`Upload attempt ${attempt} failed:`, error);
+
+      if (attempt === maxRetries) {
+        throw error;
+      }
+
+      // Exponential backoff: wait 2^attempt seconds
+      const delay = Math.pow(2, attempt) * 1000;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
   }
 }
 
 export default {
   async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
+    // Read the raw message body
+    const rawBody = await new Response(message.raw).text();
+
+    // Log basic email information
+    console.log('Received email:', {
+      from: message.from,
+      to: message.to,
+      subject: message.headers.get('subject'),
+      size: rawBody.length,
+    });
+
+    // Generate maildir filename
+    const filename = generateMaildirFilename();
+
+    // Try uploading once immediately
     try {
-      // Read the raw message body
-      const rawBody = await new Response(message.raw).text();
-
-      // Log basic email information
-      console.log('Received email:', {
-        from: message.from,
-        to: message.to,
-        subject: message.headers.get('subject'),
-        size: rawBody.length,
-      });
-
-      // Generate maildir filename
-      const filename = generateMaildirFilename();
-      // Upload to Nextcloud via WebDAV
       await uploadToNextcloud(rawBody, filename, env);
       console.log(`Email uploaded to Nextcloud as: ${filename}`);
     } catch (error) {
-      console.error('Error processing email:', error);
+      console.error('Initial upload failed, will retry in background:', error);
+
+      // Retry in background with exponential backoff
+      ctx.waitUntil(
+        uploadWithRetry(rawBody, filename, env, 3)
+          .catch(error => console.error('All upload retries failed:', error))
+      );
     }
 
     // Forward the email to backup address
