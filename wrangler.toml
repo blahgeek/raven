@@ -8,5 +8,5 @@ enabled = true
 
 [vars]
 GDRIVE_API_CLIENT_ID = "666634454375-hlqgdhlqkjagckg1cad0e0tb516mjmpn.apps.googleusercontent.com"
-GDRIVE_FOLDER_ID = "1gxhwDsgZLpd79Pad4kPNCQ6CGqjUOlGX"
+GDRIVE_FOLDER_ID = "1RiLSVxvn0unXyCNP5GMRKgWYB1CW855B"
 BACKUP_EMAIL = "raven-backup@z1k.dev"
