@@ -23,6 +23,7 @@ async function getAccessToken(env: Env): Promise<string> {
       refresh_token: tokenData.refresh_token,
       grant_type: 'refresh_token',
     }),
+    signal: AbortSignal.timeout(10000),
   });
 
   if (!response.ok) {
@@ -73,6 +74,7 @@ async function doUpload(
       'Content-Type': `multipart/related; boundary="${boundary}"`,
     },
     body: multipartRequestBody,
+    signal: AbortSignal.timeout(10000),
   });
 
   if (!response.ok) {
