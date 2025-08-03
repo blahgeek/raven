@@ -1,10 +1,12 @@
 import { ForwardableEmailMessage, ExecutionContext, ExportedHandler } from '@cloudflare/workers-types';
+import { google } from 'googleapis';
 
 interface Env {
-  NEXTCLOUD_URL: string;
-  NEXTCLOUD_USERNAME: string;
-  NEXTCLOUD_PASSWORD: string; // This will be a secret
-  NEXTCLOUD_MAILDIR_PATH: string;
+  GDRIVE_API_CLIENT_ID: string;
+  GDRIVE_API_CLIENT_SECRET: string;
+  GDRIVE_TOKEN_JSON: string;
+  GDRIVE_FOLDER_ID: string;
+
   BACKUP_EMAIL: string;
 }
 
@@ -16,59 +18,33 @@ function generateMaildirFilename(): string {
   return `${timestamp}.M${microseconds}P${random}.${hostname}`;
 }
 
-async function uploadToNextcloud(
+async function doUpload(
   rawBody: string,
   filename: string,
   env: Env
 ): Promise<void> {
-  const webdavUrl = `${env.NEXTCLOUD_URL}/remote.php/dav/files/${env.NEXTCLOUD_USERNAME}/${env.NEXTCLOUD_MAILDIR_PATH}/new/${filename}`;
+  let oauthClient = new google.auth.OAuth2(
+    env.GDRIVE_API_CLIENT_ID,
+    env.GDRIVE_API_CLIENT_SECRET,
+    "http://localhost",  // unused
+  );
+  oauthClient.setCredentials(JSON.parse(env.GDRIVE_TOKEN_JSON));
 
-  const credentials = btoa(`${env.NEXTCLOUD_USERNAME}:${env.NEXTCLOUD_PASSWORD}`);
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000);
-
-  try {
-    const response = await fetch(webdavUrl, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Basic ${credentials}`,
-        'Content-Type': 'message/rfc822',
-      },
+  const drive = google.drive({ version: 'v3', auth: oauthClient });
+  const response = await drive.files.create({
+    requestBody: {
+      name:  filename,
+      parents: [env.GDRIVE_FOLDER_ID],
+    },
+    media: {
+      mimeType: 'application/octet-stream',
       body: rawBody,
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to upload to Nextcloud: ${response.status} ${response.statusText}`);
     }
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function uploadWithRetry(
-  rawBody: string,
-  filename: string,
-  env: Env,
-  maxRetries: number = 3
-): Promise<void> {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      await uploadToNextcloud(rawBody, filename, env);
-      console.log(`Email uploaded to Nextcloud as: ${filename} (attempt ${attempt})`);
-      return;
-    } catch (error) {
-      console.error(`Upload attempt ${attempt} failed:`, error);
-
-      if (attempt === maxRetries) {
-        throw error;
-      }
-
-      // Exponential backoff: wait 2^attempt seconds
-      const delay = Math.pow(2, attempt) * 1000;
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
+  }, {
+    timeout: 25000,
+  });
+  if (!response.data.id) {
+    throw new Error(`Failed to upload: ${response.status}, ${response.statusText}`)
   }
 }
 
@@ -90,16 +66,13 @@ export default {
 
     // Try uploading once immediately
     try {
-      await uploadToNextcloud(rawBody, filename, env);
-      console.log(`Email uploaded to Nextcloud as: ${filename}`);
+      await doUpload(rawBody, filename, env);
+      console.log(`Email uploaded as: ${filename}`);
     } catch (error) {
-      console.error('Initial upload failed, will retry in background:', error);
-
-      // Retry in background with exponential backoff
-      ctx.waitUntil(
-        uploadWithRetry(rawBody, filename, env, 3)
-          .catch(error => console.error('All upload retries failed:', error))
-      );
+      console.error('Upload failed:', error);
+      if (error instanceof Error && error.stack) {
+        console.error('Stack trace:', error.stack);
+      }
     }
 
     // Forward the email to backup address

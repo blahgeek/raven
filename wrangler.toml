@@ -1,12 +1,12 @@
 name = "raven"
 main = "src/index.ts"
+compatibility_flags = [ "nodejs_compat" ]
 compatibility_date = "2025-06-15"
 
 [observability]
 enabled = true
 
 [vars]
-NEXTCLOUD_URL = "https://nextcloud.highgarden.blahgeek.com"
-NEXTCLOUD_USERNAME = "blahgeek-raven"
-NEXTCLOUD_MAILDIR_PATH = "Maildir"
+GDRIVE_API_CLIENT_ID = "666634454375-hlqgdhlqkjagckg1cad0e0tb516mjmpn.apps.googleusercontent.com"
+GDRIVE_FOLDER_ID = "1gxhwDsgZLpd79Pad4kPNCQ6CGqjUOlGX"
 BACKUP_EMAIL = "raven-backup@z1k.dev"
