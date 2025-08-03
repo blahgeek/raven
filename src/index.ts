@@ -1,5 +1,4 @@
 import { ForwardableEmailMessage, ExecutionContext, ExportedHandler } from '@cloudflare/workers-types';
-import { google } from 'googleapis';
 
 interface Env {
   GDRIVE_API_CLIENT_ID: string;
@@ -8,6 +7,30 @@ interface Env {
   GDRIVE_FOLDER_ID: string;
 
   BACKUP_EMAIL: string;
+}
+
+async function getAccessToken(env: Env): Promise<string> {
+  const tokenData = JSON.parse(env.GDRIVE_TOKEN_JSON);
+
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      client_id: env.GDRIVE_API_CLIENT_ID,
+      client_secret: env.GDRIVE_API_CLIENT_SECRET,
+      refresh_token: tokenData.refresh_token,
+      grant_type: 'refresh_token',
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get access token: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json() as { access_token: string };
+  return data.access_token;
 }
 
 function generateMaildirFilename(): string {
@@ -23,28 +46,42 @@ async function doUpload(
   filename: string,
   env: Env
 ): Promise<void> {
-  let oauthClient = new google.auth.OAuth2(
-    env.GDRIVE_API_CLIENT_ID,
-    env.GDRIVE_API_CLIENT_SECRET,
-    "http://localhost",  // unused
-  );
-  oauthClient.setCredentials(JSON.parse(env.GDRIVE_TOKEN_JSON));
+  const accessToken = await getAccessToken(env);
 
-  const drive = google.drive({ version: 'v3', auth: oauthClient });
-  const response = await drive.files.create({
-    requestBody: {
-      name:  filename,
-      parents: [env.GDRIVE_FOLDER_ID],
+  const metadata = {
+    name: filename,
+    parents: [env.GDRIVE_FOLDER_ID],
+  };
+
+  const boundary = '-------314159265358979323846';
+  const delimiter = `\r\n--${boundary}\r\n`;
+  const close_delim = `\r\n--${boundary}--`;
+
+  const multipartRequestBody = 
+    delimiter +
+    'Content-Type: application/json\r\n\r\n' +
+    JSON.stringify(metadata) +
+    delimiter +
+    'Content-Type: application/octet-stream\r\n\r\n' +
+    rawBody +
+    close_delim;
+
+  const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': `multipart/related; boundary="${boundary}"`,
     },
-    media: {
-      mimeType: 'application/octet-stream',
-      body: rawBody,
-    }
-  }, {
-    timeout: 25000,
+    body: multipartRequestBody,
   });
-  if (!response.data.id) {
-    throw new Error(`Failed to upload: ${response.status}, ${response.statusText}`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to upload: ${response.status} ${response.statusText}`);
+  }
+
+  const result = await response.json() as { id?: string };
+  if (!result.id) {
+    throw new Error('Upload succeeded but no file ID returned');
   }
 }
 
