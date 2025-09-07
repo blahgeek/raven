@@ -42,6 +42,19 @@ function generateMaildirFilename(): string {
   return `${timestamp}.M${microseconds}P${random}.${hostname}`;
 }
 
+function createMultipartBody(metadata: object, content: string, boundary: string): string {
+  const delimiter = `\r\n--${boundary}\r\n`;
+  const close_delim = `\r\n--${boundary}--`;
+
+  return delimiter +
+    'Content-Type: application/json\r\n\r\n' +
+    JSON.stringify(metadata) +
+    delimiter +
+    'Content-Type: application/octet-stream\r\n\r\n' +
+    content +
+    close_delim;
+}
+
 async function doUpload(
   rawBody: string,
   filename: string,
@@ -55,17 +68,7 @@ async function doUpload(
   };
 
   const boundary = 'eil0sheetouphohma5eeph6pahma0bi0IThae0ja';
-  const delimiter = `\r\n--${boundary}\r\n`;
-  const close_delim = `\r\n--${boundary}--`;
-
-  const multipartRequestBody = 
-    delimiter +
-    'Content-Type: application/json\r\n\r\n' +
-    JSON.stringify(metadata) +
-    delimiter +
-    'Content-Type: application/octet-stream\r\n\r\n' +
-    rawBody +
-    close_delim;
+  const multipartRequestBody = createMultipartBody(metadata, rawBody, boundary);
 
   const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
     method: 'POST',
